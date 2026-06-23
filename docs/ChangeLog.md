@@ -17,7 +17,7 @@
 ### 2026-06-23 · 字幕默认 ASR + 进度条优化
 - 字幕获取默认改为 ASR（whisper 转录），原 `--asr` 改为 `--bilibili-sub` 使用 B站 API 字幕
 - 字幕校对与笔记生成添加进度条（████░░░░ 样式），LLM 调用期间显示当前段落进度
-- ASR 下载/转录添加进度提示，whisper 内部 tqdm 输出改为 verbose=False 避免刷屏
+- ASR 下载/转录添加进度提示；whisper 模型下载接管为干净百分比进度，SHA256 校验防止损坏缓存触发 tqdm 刷屏
 - 音频下载中断/失败时自动清理残留文件（.part、.ytdl 等）
 - 修复 httpx SOCKS 代理兼容性（socksio），requirements.txt 补全依赖
 
