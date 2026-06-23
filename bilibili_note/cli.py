@@ -76,9 +76,9 @@ def main() -> None:
         help="字幕分段时长（秒），0 表示按视频时长自动决定",
     )
     parser.add_argument(
-        "--asr",
+        "--bilibili-sub",
         action="store_true",
-        help="跳过 B站字幕，直接用 ASR 转录（whisper）",
+        help="优先使用 B站 API 字幕（默认走 ASR whisper 转录）",
     )
     args = parser.parse_args()
 
@@ -97,18 +97,10 @@ def main() -> None:
     )
 
     # 2. 字幕获取
-    if args.asr:
-        _log("强制 ASR 模式：下载音频 + whisper 转录，可能需要较长时间...")
-        from .fetcher.asr import fetch_subtitle_via_asr
+    from .fetcher.asr import fetch_subtitle_via_asr
 
-        sub_path, sub_source = fetch_subtitle_via_asr(
-            video_info,
-            sub_cfg.get("work_dir", ".cache"),
-            cookies_path,
-            sub_cfg.get("asr_model", "small"),
-        )
-    else:
-        _log("获取字幕...")
+    if args.bilibili_sub:
+        _log("获取 B站字幕...")
         try:
             sub_path, sub_source = fetch_subtitle(
                 video_info,
@@ -118,15 +110,21 @@ def main() -> None:
             )
         except RuntimeError as e:
             _log(f"B站字幕不可用: {e}")
-            _log("降级到 ASR 转录（whisper），可能需要较长时间...")
-            from .fetcher.asr import fetch_subtitle_via_asr
-
+            _log("降级到 ASR 转录...")
             sub_path, sub_source = fetch_subtitle_via_asr(
                 video_info,
                 sub_cfg.get("work_dir", ".cache"),
                 cookies_path,
                 sub_cfg.get("asr_model", "small"),
             )
+    else:
+        _log("ASR 模式：下载音频 + whisper 转录...")
+        sub_path, sub_source = fetch_subtitle_via_asr(
+            video_info,
+            sub_cfg.get("work_dir", ".cache"),
+            cookies_path,
+            sub_cfg.get("asr_model", "small"),
+        )
     _log(f"字幕来源：{sub_source}")
 
     # 3. 字幕预处理

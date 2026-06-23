@@ -7,6 +7,7 @@ whisper 在函数内延迟 import，未安装时不影响其他功能。
 from __future__ import annotations
 
 import subprocess
+import sys
 from pathlib import Path
 
 from .video_info import VideoInfo
@@ -45,6 +46,7 @@ def _download_audio(
     for p in sorted(work_dir.glob(f"{video_info.bvid}.*")):
         if p.suffix.lower() in (".m4a", ".webm", ".mp3", ".opus", ".aac"):
             return str(p)
+    print("[bilibili-note] 下载音频中，请耐心等待...", file=sys.stderr)
     url = f"https://www.bilibili.com/video/{video_info.bvid}"
     output_template = str(work_dir / f"{video_info.bvid}.%(ext)s")
     cmd = [
@@ -58,11 +60,24 @@ def _download_audio(
         netscape_path = _ensure_netscape_cookies(cookies_path)
         cmd += ["--cookies", netscape_path]
     cmd.append(url)
-    subprocess.run(cmd, check=True, capture_output=True, text=True)
+    try:
+        subprocess.run(cmd, check=True, capture_output=True, text=True)
+    except (KeyboardInterrupt, subprocess.CalledProcessError):
+        _cleanup_partial(work_dir, video_info.bvid)
+        raise
+    print("[bilibili-note] 音频下载完成", file=sys.stderr)
     for p in sorted(work_dir.glob(f"{video_info.bvid}.*")):
         if p.suffix.lower() in (".m4a", ".webm", ".mp3", ".opus", ".aac"):
             return str(p)
+    _cleanup_partial(work_dir, video_info.bvid)
     raise RuntimeError("音频下载失败，文件未找到")
+
+
+def _cleanup_partial(work_dir: Path, bvid: str) -> None:
+    """清理下载中断的残留文件（.part、.ytdl 等）。"""
+    for p in sorted(work_dir.glob(f"{bvid}*")):
+        if p.is_file():
+            p.unlink(missing_ok=True)
 
 
 def _seconds_to_srt(sec: float) -> str:
@@ -77,10 +92,19 @@ def _transcribe(
     audio_path: str, work_dir: Path, bvid: str, model_name: str
 ) -> str:
     """用 whisper 转录音频，输出 SRT 文件。"""
+    import warnings
+
     import whisper
 
+    print("[bilibili-note] whisper 转录中，请耐心等待...", file=sys.stderr)
     model = whisper.load_model(model_name)
-    result = model.transcribe(audio_path, language="zh", task="transcribe")
+    # 抑制 whisper 内部 tqdm 进度条刷屏
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        result = model.transcribe(
+            audio_path, language="zh", task="transcribe", verbose=False
+        )
+    print("[bilibili-note] whisper 转录完成", file=sys.stderr)
 
     srt_path = work_dir / f"{bvid}.asr.srt"
     blocks = []

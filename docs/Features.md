@@ -8,9 +8,9 @@ B站课程视频转学习笔记 Agent 的功能与代码结构总览。
 
 视频元信息抓取：通过 B 站 view API 获取标题、UP 主、时长、简介、cid。
 
-字幕获取：以 B站 player/v2 API 为主（CC 优先、AI 兜底），yt-dlp 备选，支持 cookies 登录态。B站字幕不可用时降级到 ASR（yt-dlp 下载音频 + whisper 转录），也可通过 --asr 参数强制走 ASR。
+字幕获取：默认走 ASR 转录（yt-dlp 下载音频 + whisper），质量更可靠。也可通过 --bilibili-sub 使用 B站 player/v2 API 字幕（CC 优先、AI 兜底），yt-dlp 备选，支持 cookies 登录态。
 
-字幕预处理：清洗语气词、合并碎片句、按主题分段、保留时间戳。ASR 字幕额外经过 LLM 校对（subtitle_refiner）：修正识别错误、繁体转简体、添加标点，输出优化字幕文件。
+字幕预处理：清洗语气词、合并碎片句、按主题分段、保留时间戳。ASR 字幕额外经过 LLM 校对（subtitle_refiner）：修正识别错误、繁体转简体、添加标点，输出优化字幕文件。字幕校对和笔记生成均有进度条展示。
 
 笔记生成：学长博客风 prompt 驱动 LLM，基于优化后字幕生成，长视频分段生成后合并。文风铁律内嵌于 prompt：禁 emoji、禁"老师"人称、禁分点罗列、禁 AI 套路话术、段落叙述为主。
 
@@ -49,9 +49,9 @@ setup.sh                 一键安装脚本
 
 fetcher/video_info 输入 B 站 URL，输出 {title, up 主, 时长, 简介, cid, 封面}，依赖 httpx + B 站 API。
 
-fetcher/subtitle 输入 video_info，输出字幕文件路径与来源标记，以 B站 API 为主、yt-dlp 备选。
+fetcher/subtitle 输入 video_info，输出字幕文件路径与来源标记，通过 B站 API 获取（--bilibili-sub 启用）。
 
-fetcher/asr 输入 video_info，输出 SRT 字幕文件，依赖 yt-dlp 下载音频 + whisper 转录。
+fetcher/asr 输入 video_info，输出 SRT 字幕文件，默认字幕来源，依赖 yt-dlp 下载音频 + whisper 转录。
 
 processor/subtitle_cleaner 输入字幕文件，按 10 分钟分段输出结构化段落列表，无外部依赖。
 

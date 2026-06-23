@@ -5,6 +5,8 @@
 
 from __future__ import annotations
 
+import sys
+
 from ..fetcher.video_info import VideoInfo
 from ..processor.subtitle_cleaner import SubtitleSegment, format_segment_for_prompt
 from .llm_client import LLMClient
@@ -14,6 +16,11 @@ from .prompt import (
     build_full_prompt,
     build_segment_prompt,
 )
+
+
+def _progress_bar(current: int, total: int, width: int = 24) -> str:
+    filled = round(current / total * width)
+    return f"[{'█' * filled}{'░' * (width - filled)}]"
 
 
 class NoteWriter:
@@ -38,14 +45,27 @@ class NoteWriter:
 
         parts: list[str] = []
         prev_summary = ""
+        total = len(segments)
         for i, seg in enumerate(segments):
             seg_text = format_segment_for_prompt(seg)
+            bar = _progress_bar(i + 1, total)
+            print(
+                f"\r[bilibili-note] 生成笔记  {bar} {i+1}/{total}",
+                file=sys.stderr, end="", flush=True,
+            )
             user_prompt = build_segment_prompt(
-                seg_text, i + 1, len(segments), prev_summary, video_info
+                seg_text, i + 1, total, prev_summary, video_info
             )
             note_part = self.llm.chat(SYSTEM_PROMPT, user_prompt).strip()
             parts.append(note_part)
-            prev_summary = self._summarize(note_part)
+            if i < total - 1:
+                print(file=sys.stderr)
+                print(
+                    f"\r[bilibili-note] 生成摘要  {bar} {i+1}/{total}",
+                    file=sys.stderr, end="", flush=True,
+                )
+                prev_summary = self._summarize(note_part)
+        print(file=sys.stderr)
         return "\n\n".join(parts)
 
     def generate_from_texts(
@@ -62,13 +82,26 @@ class NoteWriter:
 
         parts: list[str] = []
         prev_summary = ""
+        total = len(texts)
         for i, text in enumerate(texts):
+            bar = _progress_bar(i + 1, total)
+            print(
+                f"\r[bilibili-note] 生成笔记  {bar} {i+1}/{total}",
+                file=sys.stderr, end="", flush=True,
+            )
             user_prompt = build_segment_prompt(
-                text, i + 1, len(texts), prev_summary, video_info
+                text, i + 1, total, prev_summary, video_info
             )
             note_part = self.llm.chat(SYSTEM_PROMPT, user_prompt).strip()
             parts.append(note_part)
-            prev_summary = self._summarize(note_part)
+            if i < total - 1:
+                print(file=sys.stderr)
+                print(
+                    f"\r[bilibili-note] 生成摘要  {bar} {i+1}/{total}",
+                    file=sys.stderr, end="", flush=True,
+                )
+                prev_summary = self._summarize(note_part)
+        print(file=sys.stderr)
         return "\n\n".join(parts)
 
     def _summarize(self, note_text: str) -> str:

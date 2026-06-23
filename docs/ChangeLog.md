@@ -14,6 +14,13 @@
 
 ---
 
+### 2026-06-23 · 字幕默认 ASR + 进度条优化
+- 字幕获取默认改为 ASR（whisper 转录），原 `--asr` 改为 `--bilibili-sub` 使用 B站 API 字幕
+- 字幕校对与笔记生成添加进度条（████░░░░ 样式），LLM 调用期间显示当前段落进度
+- ASR 下载/转录添加进度提示，whisper 内部 tqdm 输出改为 verbose=False 避免刷屏
+- 音频下载中断/失败时自动清理残留文件（.part、.ytdl 等）
+- 修复 httpx SOCKS 代理兼容性（socksio），requirements.txt 补全依赖
+
 ### 2026-06-23 · LLM 字幕校对与分段策略调整
 - 新增 generator/subtitle_refiner.py：LLM 逐段校对 ASR 字幕（纠错+繁简转换+加标点），输出 .refined.txt 优化字幕文件
 - note_writer.py 新增 generate_from_texts()：基于预处理后文本生成笔记

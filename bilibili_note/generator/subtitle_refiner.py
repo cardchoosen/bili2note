@@ -7,6 +7,7 @@
 
 from __future__ import annotations
 
+import sys
 from pathlib import Path
 
 from ..fetcher.video_info import VideoInfo
@@ -49,14 +50,26 @@ class SubtitleRefiner:
             优化后的文本列表，保留 [mm:ss] 时间戳格式。
         """
         refined: list[str] = []
+        total = len(segments)
         for i, seg in enumerate(segments):
+            bar = _progress_bar(i + 1, total)
+            print(
+                f"\r[bilibili-note] 校对字幕  {bar} {i+1}/{total}",
+                file=sys.stderr, end="", flush=True,
+            )
             seg_text = format_segment_for_prompt(seg)
             prompt = build_refine_prompt(seg_text, video_info)
             result = self.llm.chat(
                 REFINE_SYSTEM_PROMPT, prompt, temperature=0.3
             ).strip()
             refined.append(result)
+        print(file=sys.stderr)
         return refined
+
+
+def _progress_bar(current: int, total: int, width: int = 24) -> str:
+    filled = round(current / total * width)
+    return f"[{'█' * filled}{'░' * (width - filled)}]"
 
 
 def write_refined_subtitle(
