@@ -1,6 +1,20 @@
+# Python
 .venv/
-.cache/
 __pycache__/
+*.pyc
+*.egg-info/
+dist/
+build/
+
+# 敏感文件
 bilibili_cookies.json
 bilibili_cookies.txt
+.env
+
+# 临时/中间产物
+.cache/
 *.subtitles.json
+*.refined.txt
+
+# 系统
+.DS_Store
