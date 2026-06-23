@@ -1,0 +1,6 @@
+.venv/
+.cache/
+__pycache__/
+bilibili_cookies.json
+bilibili_cookies.txt
+*.subtitles.json
