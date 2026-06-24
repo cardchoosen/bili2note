@@ -6,10 +6,11 @@
 
 from __future__ import annotations
 
-import sys
 import time
 
 import httpx
+
+from ..log import warn
 
 _RETRYABLE = (
     httpx.RemoteProtocolError,
@@ -92,10 +93,9 @@ class LLMClient:
                 last_exc = exc
                 if attempt < _MAX_RETRIES:
                     wait = _RETRY_BACKOFF * (2 ** attempt)
-                    print(
-                        f"[bilibili-note] LLM 请求失败，{wait:.0f}s 后重试 "
-                        f"({attempt + 1}/{_MAX_RETRIES}): {exc}",
-                        file=sys.stderr,
+                    warn(
+                        f"LLM 请求失败，{wait:.0f}s 后重试 "
+                        f"({attempt + 1}/{_MAX_RETRIES}): {exc}"
                     )
                     time.sleep(wait)
         raise last_exc  # type: ignore[misc]

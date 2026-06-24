@@ -5,9 +5,8 @@
 
 from __future__ import annotations
 
-import sys
-
 from ..fetcher.video_info import VideoInfo
+from ..log import progress, progress_done
 from ..processor.subtitle_cleaner import SubtitleSegment, format_segment_for_prompt
 from .llm_client import LLMClient
 from .prompt import (
@@ -49,23 +48,17 @@ class NoteWriter:
         for i, seg in enumerate(segments):
             seg_text = format_segment_for_prompt(seg)
             bar = _progress_bar(i + 1, total)
-            print(
-                f"\r[bilibili-note] 生成笔记  {bar} {i+1}/{total}",
-                file=sys.stderr, end="", flush=True,
-            )
+            progress(f"生成笔记  {bar} {i+1}/{total}")
             user_prompt = build_segment_prompt(
                 seg_text, i + 1, total, prev_summary, video_info
             )
             note_part = self.llm.chat(SYSTEM_PROMPT, user_prompt).strip()
             parts.append(note_part)
             if i < total - 1:
-                print(file=sys.stderr)
-                print(
-                    f"\r[bilibili-note] 生成摘要  {bar} {i+1}/{total}",
-                    file=sys.stderr, end="", flush=True,
-                )
+                progress_done(f"生成笔记  {bar} {i+1}/{total}")
+                progress(f"生成摘要  {bar} {i+1}/{total}")
                 prev_summary = self._summarize(note_part)
-        print(file=sys.stderr)
+        progress_done(f"生成笔记  {_progress_bar(total, total)} {total}/{total}")
         return "\n\n".join(parts)
 
     def generate_from_texts(
@@ -85,23 +78,17 @@ class NoteWriter:
         total = len(texts)
         for i, text in enumerate(texts):
             bar = _progress_bar(i + 1, total)
-            print(
-                f"\r[bilibili-note] 生成笔记  {bar} {i+1}/{total}",
-                file=sys.stderr, end="", flush=True,
-            )
+            progress(f"生成笔记  {bar} {i+1}/{total}")
             user_prompt = build_segment_prompt(
                 text, i + 1, total, prev_summary, video_info
             )
             note_part = self.llm.chat(SYSTEM_PROMPT, user_prompt).strip()
             parts.append(note_part)
             if i < total - 1:
-                print(file=sys.stderr)
-                print(
-                    f"\r[bilibili-note] 生成摘要  {bar} {i+1}/{total}",
-                    file=sys.stderr, end="", flush=True,
-                )
+                progress_done(f"生成笔记  {bar} {i+1}/{total}")
+                progress(f"生成摘要  {bar} {i+1}/{total}")
                 prev_summary = self._summarize(note_part)
-        print(file=sys.stderr)
+        progress_done(f"生成笔记  {_progress_bar(total, total)} {total}/{total}")
         return "\n\n".join(parts)
 
     def _summarize(self, note_text: str) -> str:

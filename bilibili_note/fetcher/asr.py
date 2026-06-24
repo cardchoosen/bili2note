@@ -14,6 +14,7 @@ from pathlib import Path
 
 import httpx
 
+from ..log import info, warn, error, progress, progress_done
 from .video_info import VideoInfo, HEADERS
 
 PLAYURL_API = "https://api.bilibili.com/x/player/playurl"
@@ -26,8 +27,7 @@ PLAYURL_API = "https://api.bilibili.com/x/player/playurl"
 def _download_audio(video_info: VideoInfo, work_dir: Path) -> str:
     """下载 B站视频音频，返回文件路径。已有缓存则复用。
 
-    方案一：B站 playurl API 获取音频直链，httpx 下载（主力，稳定不被 412）。
-    方案二：yt-dlp 降级下载。
+    优先走 playurl API 直链（httpx），不被 412 拦截；失败降级 yt-dlp。
     """
     page = getattr(video_info, "page", 1)
     audio_prefix = f"{video_info.bvid}.p{page}" if page > 1 else video_info.bvid
@@ -37,7 +37,7 @@ def _download_audio(video_info: VideoInfo, work_dir: Path) -> str:
         if p.suffix.lower() in (".m4a", ".webm", ".mp3", ".opus", ".aac"):
             return str(p)
 
-    print("[bilibili-note] 下载音频中，请耐心等待...", file=sys.stderr)
+    info("下载音频中，请耐心等待...")
 
     # 方案一：playurl API 直链下载
     audio_url = _get_audio_url(video_info)
@@ -45,13 +45,10 @@ def _download_audio(video_info: VideoInfo, work_dir: Path) -> str:
         try:
             return _download_audio_direct(audio_url, work_dir, audio_prefix)
         except Exception as exc:
-            print(
-                f"[bilibili-note] 直链下载失败 ({exc})，降级 yt-dlp...",
-                file=sys.stderr,
-            )
+            warn(f"直链下载失败 ({exc})，降级 yt-dlp...")
 
     # 方案二：yt-dlp 降级
-    print("[bilibili-note] 提示：如遇网络问题可尝试关闭代理后重试", file=sys.stderr)
+    warn("提示：如遇网络问题可尝试关闭代理后重试")
     return _download_via_ytdlp(video_info, work_dir, audio_prefix)
 
 
@@ -107,10 +104,9 @@ def _download_audio_direct(
                 downloaded += len(chunk)
                 if total > 0:
                     pct = downloaded * 100 // total
-                    print(f"\r[bilibili-note] 下载音频  {pct}%",
-                          file=sys.stderr, end="", flush=True)
-    print(file=sys.stderr)
-    print("[bilibili-note] 音频下载完成", file=sys.stderr)
+                    progress(f"下载音频  {pct}%")
+    progress_done(f"下载音频  100%")
+    info("音频下载完成")
     return str(output_path)
 
 
@@ -165,22 +161,18 @@ def _download_via_ytdlp(
             if retryable and attempt < _YTDLP_MAX_RETRIES:
                 wait = _YTDLP_BACKOFF * (2 ** attempt)
                 first_line = err_text.strip().split("\n")[0]
-                print(
-                    f"[bilibili-note] yt-dlp 失败，{wait:.0f}s 后重试 "
-                    f"({attempt + 1}/{_YTDLP_MAX_RETRIES})",
-                    file=sys.stderr,
-                )
+                warn(f"yt-dlp 失败，{wait:.0f}s 后重试 "
+                      f"({attempt + 1}/{_YTDLP_MAX_RETRIES})")
                 if first_line:
-                    print(f"[bilibili-note] 错误原因：{first_line}", file=sys.stderr)
+                    warn(f"错误原因：{first_line}")
                 time.sleep(wait)
             else:
                 if err_text:
-                    print(f"[bilibili-note] yt-dlp 错误详情：\n{err_text.strip()}",
-                          file=sys.stderr)
+                    error(f"yt-dlp 错误详情：\n{err_text.strip()}")
                 _cleanup_partial(work_dir, audio_prefix)
                 raise
 
-    print("[bilibili-note] 音频下载完成", file=sys.stderr)
+    info("音频下载完成")
     for p in sorted(work_dir.glob(f"{audio_prefix}.*")):
         if p.suffix.lower() in (".m4a", ".webm", ".mp3", ".opus", ".aac"):
             return str(p)
@@ -254,8 +246,7 @@ def _ensure_model(model_name: str) -> None:
             return
         os.unlink(model_path)
 
-    print(f"[bilibili-note] 下载 whisper 模型 ({model_name}) ...",
-          file=sys.stderr, end="", flush=True)
+    progress(f"下载 whisper 模型 ({model_name}) ...")
 
     try:
         req = urllib.request.Request(url)
@@ -271,8 +262,7 @@ def _ensure_model(model_name: str) -> None:
                 downloaded += len(chunk)
                 if total > 0:
                     pct = downloaded * 100 // total
-                    print(f"\r[bilibili-note] 下载 whisper 模型 ({model_name}) "
-                          f"{pct}%", file=sys.stderr, end="", flush=True)
+                    progress(f"下载 whisper 模型 ({model_name})  {pct}%")
         with open(model_path, "wb") as f:
             f.write(data)
         print(file=sys.stderr)
@@ -293,14 +283,14 @@ def _transcribe(
 
     _ensure_model(model_name)
 
-    print("[bilibili-note] whisper 转录中，请耐心等待...", file=sys.stderr)
+    info("whisper 转录中，请耐心等待...")
     model = whisper.load_model(model_name)
     with warnings.catch_warnings():
         warnings.simplefilter("ignore")
         result = model.transcribe(
             audio_path, language="zh", task="transcribe", verbose=False
         )
-    print("[bilibili-note] whisper 转录完成", file=sys.stderr)
+    info("whisper 转录完成")
 
     srt_path = work_dir / f"{bvid}.asr.srt"
     blocks = []

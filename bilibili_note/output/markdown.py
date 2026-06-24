@@ -34,7 +34,6 @@ def _build_note_md(
     header = (
         f"# {display_title}\n\n"
         f"> 原视频：{url}\n"
-        f"> 标题：{video_info.title}\n"
         f"> UP主：{video_info.up}"
         f" · 时长：{format_duration(video_info.duration)}\n"
         f"> 笔记生成：{date.today().isoformat()}"

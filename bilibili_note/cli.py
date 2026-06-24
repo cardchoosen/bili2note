@@ -22,16 +22,13 @@ from .fetcher.video_info import fetch_video_info, format_duration
 from .generator.llm_client import LLMClient, is_api_configured
 from .generator.note_writer import NoteWriter
 from .generator.subtitle_refiner import SubtitleRefiner
+from .log import info
 from .output.markdown import write_output
 from .processor.subtitle_cleaner import format_segment_for_prompt, process_subtitle
 
 
 def _default_config_path() -> str:
     return str(Path(__file__).resolve().parent.parent / "config.yaml")
-
-
-def _log(msg: str) -> None:
-    print(f"[bilibili-note] {msg}", file=sys.stderr)
 
 
 def load_config(config_path: str) -> dict:
@@ -76,27 +73,27 @@ def main() -> None:
     out_cfg = config.get("output", {})
 
     # 1. 视频元信息
-    _log("抓取视频元信息...")
+    info("抓取视频元信息...")
     video_info = fetch_video_info(args.url)
-    _log(
+    info(
         f"《{video_info.title}》 UP主:{video_info.up} "
         f"时长:{format_duration(video_info.duration)}"
     )
 
     # 2. ASR 转录字幕
-    _log("ASR 转录：下载音频 + whisper 转录...")
+    info("ASR 转录：下载音频 + whisper 转录...")
     sub_path, sub_source = fetch_subtitle(
         video_info,
         work_dir=sub_cfg.get("work_dir", ".cache"),
         model_name=sub_cfg.get("asr_model", "small"),
     )
-    _log(f"字幕来源：{sub_source}")
+    info(f"字幕来源：{sub_source}")
 
     # 3. 字幕预处理
-    _log("预处理字幕...")
+    info("预处理字幕...")
     seg_seconds = args.segment_seconds if args.segment_seconds > 0 else 600
     cues, segments = process_subtitle(sub_path, seg_seconds)
-    _log(f"字幕 {len(cues)} 条，分为 {len(segments)} 段")
+    info(f"字幕 {len(cues)} 条，分为 {len(segments)} 段")
 
     notes_dir = out_cfg.get("notes_dir", "notes")
 
@@ -105,16 +102,16 @@ def main() -> None:
         llm = LLMClient.from_config(config)
 
         # 4a. LLM 校对字幕
-        _log("API 模式：LLM 校对字幕（纠错+简繁转换）...")
+        info("API 模式：LLM 校对字幕（纠错+简繁转换）...")
         refiner = SubtitleRefiner(llm)
         refined_texts = refiner.refine(segments, video_info)
 
         # 4b. 生成笔记
-        _log("API 模式：调用 LLM 生成笔记...")
+        info("API 模式：调用 LLM 生成笔记...")
         writer = NoteWriter(llm)
         body = writer.generate_from_texts(refined_texts, video_info)
         usage = llm.get_usage()
-        _log(
+        info(
             f"token 统计: 输入 {usage['prompt_tokens']} + "
             f"输出 {usage['completion_tokens']} = "
             f"总计 {usage['total_tokens']}"
@@ -127,7 +124,7 @@ def main() -> None:
             refined_texts=refined_texts,
             note_body=body,
         )
-        _log(f"笔记已生成：{note_path}")
+        info(f"笔记已生成：file://{Path(note_path).resolve()}")
     else:
         # agent 模式：输出字幕 JSON 到视频文件夹
         out_dir = _build_output_dir(notes_dir, video_info)
@@ -149,8 +146,8 @@ def main() -> None:
         json_path.write_text(
             json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8"
         )
-        _log(f"字幕文件已输出：{json_path}")
-        _log("请将此文件内容提供给外部 agent：先预处理纠错，再生成笔记")
+        info(f"字幕文件已输出：{json_path}")
+        info("请将此文件内容提供给外部 agent：先预处理纠错，再生成笔记")
 
 
 if __name__ == "__main__":

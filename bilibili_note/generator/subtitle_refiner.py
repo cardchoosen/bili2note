@@ -7,10 +7,10 @@
 
 from __future__ import annotations
 
-import sys
 from pathlib import Path
 
 from ..fetcher.video_info import VideoInfo
+from ..log import progress, progress_done
 from ..processor.subtitle_cleaner import SubtitleSegment, format_segment_for_prompt
 from .llm_client import LLMClient
 
@@ -53,17 +53,14 @@ class SubtitleRefiner:
         total = len(segments)
         for i, seg in enumerate(segments):
             bar = _progress_bar(i + 1, total)
-            print(
-                f"\r[bilibili-note] 校对字幕  {bar} {i+1}/{total}",
-                file=sys.stderr, end="", flush=True,
-            )
+            progress(f"校对字幕  {bar} {i+1}/{total}")
             seg_text = format_segment_for_prompt(seg)
             prompt = build_refine_prompt(seg_text, video_info)
             result = self.llm.chat(
                 REFINE_SYSTEM_PROMPT, prompt, temperature=0.3
             ).strip()
             refined.append(result)
-        print(file=sys.stderr)
+        progress_done(f"校对字幕  {_progress_bar(total, total)} {total}/{total}")
         return refined
 
 
