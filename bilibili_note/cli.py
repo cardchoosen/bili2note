@@ -105,17 +105,41 @@ def main() -> None:
         info("API 模式：LLM 校对字幕（纠错+简繁转换）...")
         refiner = SubtitleRefiner(llm)
         refined_texts = refiner.refine(segments, video_info)
+        refine_usage = llm.reset_usage()
 
         # 4b. 生成笔记
         info("API 模式：调用 LLM 生成笔记...")
         writer = NoteWriter(llm)
         body = writer.generate_from_texts(refined_texts, video_info)
-        usage = llm.get_usage()
-        info(
-            f"token 统计: 输入 {usage['prompt_tokens']} + "
-            f"输出 {usage['completion_tokens']} = "
-            f"总计 {usage['total_tokens']}"
-        )
+        note_usage = llm.reset_usage()
+
+        # 4c. token 统计表格
+        total_prompt = refine_usage["prompt_tokens"] + note_usage["prompt_tokens"]
+        total_completion = refine_usage["completion_tokens"] + note_usage["completion_tokens"]
+        total_all = total_prompt + total_completion
+
+        def _fmt(n: int) -> str:
+            return f"{n:,}"
+
+        lines = [
+            "",
+            " token 统计",
+            f" {'─' * 42}",
+            f" {'步骤':<12} {'输入':>8} {'输出':>8} {'合计':>8}",
+            f" {'─' * 42}",
+            f" {'字幕校对':<12} {_fmt(refine_usage['prompt_tokens']):>8} "
+            f"{_fmt(refine_usage['completion_tokens']):>8} "
+            f"{_fmt(refine_usage['total_tokens']):>8}",
+            f" {'笔记生成':<12} {_fmt(note_usage['prompt_tokens']):>8} "
+            f"{_fmt(note_usage['completion_tokens']):>8} "
+            f"{_fmt(note_usage['total_tokens']):>8}",
+            f" {'─' * 42}",
+            f" {'总计':<12} {_fmt(total_prompt):>8} {_fmt(total_completion):>8} "
+            f"{_fmt(total_all):>8}",
+            f" {'─' * 42}",
+        ]
+        for line in lines:
+            print(f"\033[36m[bili2note]\033[0m{line}", file=sys.stderr)
 
         # 4c. 输出所有产物到视频文件夹
         note_path = write_output(

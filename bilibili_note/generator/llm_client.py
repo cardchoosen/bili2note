@@ -107,3 +107,10 @@ class LLMClient:
             "completion_tokens": self.total_completion_tokens,
             "total_tokens": self.total_prompt_tokens + self.total_completion_tokens,
         }
+
+    def reset_usage(self) -> dict:
+        """返回当前累计用量并归零，用于分步骤统计。"""
+        usage = self.get_usage()
+        self.total_prompt_tokens = 0
+        self.total_completion_tokens = 0
+        return usage
