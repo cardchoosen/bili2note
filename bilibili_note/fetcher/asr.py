@@ -1,4 +1,8 @@
-"""字幕获取层：yt-dlp 下载音频 + whisper 转录生成字幕。"""
+"""字幕获取层：下载音频 + whisper 转录生成字幕。
+
+音频下载优先通过 B站 playurl API 获取直链（稳定，不被 412 拦截），
+不可用时降级 yt-dlp。
+"""
 
 from __future__ import annotations
 
@@ -8,32 +12,22 @@ import sys
 import time
 from pathlib import Path
 
-from .video_info import VideoInfo
+import httpx
+
+from .video_info import VideoInfo, HEADERS
+
+PLAYURL_API = "https://api.bilibili.com/x/player/playurl"
 
 
 # ---------------------------------------------------------------------------
-# 音频下载（yt-dlp）
+# 音频下载
 # ---------------------------------------------------------------------------
-
-# yt-dlp 瞬时网络错误关键词，匹配到则触发重试
-_RETRYABLE_ERRORS = (
-    "SSL: UNEXPECTED_EOF_WHILE_READING",
-    "EOF occurred in violation of protocol",
-    "HTTP Error 5",
-    "HTTP Error 412",
-    "timed out",
-    "Connection reset by peer",
-    "No route to host",
-)
-
-_MAX_RETRIES = 3
-_BACKOFF = 2.0  # 首次重试等待秒数，之后翻倍
-
 
 def _download_audio(video_info: VideoInfo, work_dir: Path) -> str:
-    """用 yt-dlp 下载 B站视频音频，返回文件路径。已有缓存则复用。
+    """下载 B站视频音频，返回文件路径。已有缓存则复用。
 
-    瞬时网络错误自动重试（最多 3 次，指数退避），失败时打印 yt-dlp 错误详情。
+    方案一：B站 playurl API 获取音频直链，httpx 下载（主力，稳定不被 412）。
+    方案二：yt-dlp 降级下载。
     """
     page = getattr(video_info, "page", 1)
     audio_prefix = f"{video_info.bvid}.p{page}" if page > 1 else video_info.bvid
@@ -44,8 +38,103 @@ def _download_audio(video_info: VideoInfo, work_dir: Path) -> str:
             return str(p)
 
     print("[bilibili-note] 下载音频中，请耐心等待...", file=sys.stderr)
-    print("[bilibili-note] 提示：如遇网络问题可尝试关闭代理后重试", file=sys.stderr)
 
+    # 方案一：playurl API 直链下载
+    audio_url = _get_audio_url(video_info)
+    if audio_url:
+        try:
+            return _download_audio_direct(audio_url, work_dir, audio_prefix)
+        except Exception as exc:
+            print(
+                f"[bilibili-note] 直链下载失败 ({exc})，降级 yt-dlp...",
+                file=sys.stderr,
+            )
+
+    # 方案二：yt-dlp 降级
+    print("[bilibili-note] 提示：如遇网络问题可尝试关闭代理后重试", file=sys.stderr)
+    return _download_via_ytdlp(video_info, work_dir, audio_prefix)
+
+
+# -- playurl API 方案 ---------------------------------------------------------
+
+def _get_audio_url(video_info: VideoInfo) -> str | None:
+    """通过 B站 playurl API 获取音频流直链。"""
+    try:
+        resp = httpx.get(
+            PLAYURL_API,
+            params={
+                "bvid": video_info.bvid,
+                "cid": video_info.cid,
+                "fnval": 16,
+                "qn": 0,
+                "fnver": 0,
+                "fourk": 1,
+            },
+            headers=HEADERS,
+            timeout=30,
+        )
+        resp.raise_for_status()
+        data = resp.json()
+        if data.get("code") != 0:
+            return None
+        dash = data.get("data", {}).get("dash", {})
+        audios = dash.get("audio", [])
+        if audios:
+            return audios[0].get("baseUrl") or audios[0].get("base_url", "")
+        return None
+    except Exception:
+        return None
+
+
+def _download_audio_direct(
+    audio_url: str, work_dir: Path, audio_prefix: str
+) -> str:
+    """从直链流式下载音频，显示百分比进度。"""
+    ext = os.path.splitext(audio_url.split("?")[0])[1] or ".m4a"
+    output_path = work_dir / f"{audio_prefix}{ext}"
+
+    with httpx.stream(
+        "GET", audio_url,
+        headers={**HEADERS, "Referer": "https://www.bilibili.com"},
+        timeout=300, follow_redirects=True,
+    ) as resp:
+        resp.raise_for_status()
+        total = int(resp.headers.get("Content-Length", 0))
+        downloaded = 0
+        with open(output_path, "wb") as f:
+            for chunk in resp.iter_bytes(chunk_size=65536):
+                f.write(chunk)
+                downloaded += len(chunk)
+                if total > 0:
+                    pct = downloaded * 100 // total
+                    print(f"\r[bilibili-note] 下载音频  {pct}%",
+                          file=sys.stderr, end="", flush=True)
+    print(file=sys.stderr)
+    print("[bilibili-note] 音频下载完成", file=sys.stderr)
+    return str(output_path)
+
+
+# -- yt-dlp 降级方案 -----------------------------------------------------------
+
+_YTDLP_RETRYABLE = (
+    "SSL: UNEXPECTED_EOF_WHILE_READING",
+    "EOF occurred in violation of protocol",
+    "HTTP Error 5",
+    "HTTP Error 412",
+    "timed out",
+    "Connection reset by peer",
+    "No route to host",
+)
+
+_YTDLP_MAX_RETRIES = 3
+_YTDLP_BACKOFF = 2.0
+
+
+def _download_via_ytdlp(
+    video_info: VideoInfo, work_dir: Path, audio_prefix: str
+) -> str:
+    """yt-dlp 降级下载，带重试。"""
+    page = getattr(video_info, "page", 1)
     url = f"https://www.bilibili.com/video/{video_info.bvid}"
     if page > 1:
         url += f"?p={page}"
@@ -55,16 +144,13 @@ def _download_audio(video_info: VideoInfo, work_dir: Path) -> str:
         "-f", "bestaudio[ext=m4a]/bestaudio/best",
         "--no-progress",
         "--no-playlist",
-        "--user-agent",
-        "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
-        "AppleWebKit/537.36 (KHTML, like Gecko) "
-        "Chrome/120.0.0.0 Safari/537.36",
-        "--add-header", "Referer:https://www.bilibili.com",
+        "--user-agent", HEADERS["User-Agent"],
+        "--add-header", f"Referer:{HEADERS['Referer']}",
         "-o", output_template,
         url,
     ]
 
-    for attempt in range(_MAX_RETRIES + 1):
+    for attempt in range(_YTDLP_MAX_RETRIES + 1):
         try:
             subprocess.run(cmd, check=True, capture_output=True, text=True)
             break
@@ -74,22 +160,20 @@ def _download_audio(video_info: VideoInfo, work_dir: Path) -> str:
         except subprocess.CalledProcessError as exc:
             err_text = (exc.stderr or "") + (exc.stdout or "")
             retryable = any(
-                keyword in err_text for keyword in _RETRYABLE_ERRORS
+                keyword in err_text for keyword in _YTDLP_RETRYABLE
             )
-            if retryable and attempt < _MAX_RETRIES:
-                wait = _BACKOFF * (2 ** attempt)
+            if retryable and attempt < _YTDLP_MAX_RETRIES:
+                wait = _YTDLP_BACKOFF * (2 ** attempt)
+                first_line = err_text.strip().split("\n")[0]
                 print(
-                    f"[bilibili-note] 下载失败，{wait:.0f}s 后重试 "
-                    f"({attempt + 1}/{_MAX_RETRIES})",
+                    f"[bilibili-note] yt-dlp 失败，{wait:.0f}s 后重试 "
+                    f"({attempt + 1}/{_YTDLP_MAX_RETRIES})",
                     file=sys.stderr,
                 )
-                # 只打印错误的第一行，避免刷屏
-                first_line = err_text.strip().split("\n")[0]
                 if first_line:
                     print(f"[bilibili-note] 错误原因：{first_line}", file=sys.stderr)
                 time.sleep(wait)
             else:
-                # 重试耗尽或不可重试的错误，打印完整信息后抛出
                 if err_text:
                     print(f"[bilibili-note] yt-dlp 错误详情：\n{err_text.strip()}",
                           file=sys.stderr)
@@ -97,8 +181,6 @@ def _download_audio(video_info: VideoInfo, work_dir: Path) -> str:
                 raise
 
     print("[bilibili-note] 音频下载完成", file=sys.stderr)
-
-    # 找到刚下载的文件
     for p in sorted(work_dir.glob(f"{audio_prefix}.*")):
         if p.suffix.lower() in (".m4a", ".webm", ".mp3", ".opus", ".aac"):
             return str(p)
