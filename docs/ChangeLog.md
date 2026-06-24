@@ -14,6 +14,14 @@
 
 ---
 
+### 2026-06-24 · 精简为纯 ASR 路径
+- 删除 fetcher/subtitle.py（B站 API 字幕、yt-dlp 备选字幕）
+- 删除 cookies 相关逻辑（video_info.load_cookies、asr._ensure_netscape_cookies、--bilibili-sub 参数）
+- asr.py 重命名入口函数 fetch_subtitle_via_asr → fetch_subtitle，代码分段加注释
+- 精简 cli.py：字幕获取直走 ASR，无分支
+- 精简 config.yaml：移除 bilibili 配置段
+- 同步更新 Features.md、ChangeLog.md、README.md
+
 ### 2026-06-24 · 分 P 下载修复 + LLM 自动重试
 - 修复合集分 P 视频音频下载：`_download_audio` URL 遗漏 `?p=N` 导致 yt-dlp 始终下载 p=1；VideoInfo 新增 page 字段，文件名区分分 P
 - LLM 客户端新增自动重试：瞬时错误（RemoteProtocolError、ReadTimeout、ConnectError）最多重试 3 次，指数退避 2/4/8s

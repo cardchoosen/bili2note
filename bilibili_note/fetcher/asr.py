@@ -1,8 +1,4 @@
-"""ASR 字幕兜底层。
-
-当 B站字幕不可用时，用 yt-dlp 下载音频 + openai-whisper 转录生成字幕。
-whisper 在函数内延迟 import，未安装时不影响其他功能。
-"""
+"""字幕获取层：下载音频 + whisper 转录生成字幕。"""
 
 from __future__ import annotations
 
@@ -14,41 +10,22 @@ from pathlib import Path
 from .video_info import VideoInfo
 
 
-def _ensure_netscape_cookies(cookies_path: str) -> str:
-    """JSON 格式 cookies 转 Netscape 格式（yt-dlp 需要），返回文件路径。"""
-    if not cookies_path or not cookies_path.endswith(".json"):
-        return cookies_path
-    p = Path(cookies_path)
-    if not p.exists():
-        return cookies_path
-    import json
-
-    arr = json.loads(p.read_text(encoding="utf-8"))
-    lines = ["# Netscape HTTP Cookie File", ""]
-    for c in arr:
-        domain = c.get("domain", "")
-        flag = "TRUE" if domain.startswith(".") else "FALSE"
-        path = c.get("path", "/")
-        secure = "TRUE" if c.get("secure") else "FALSE"
-        exp = int(c.get("expirationDate", 0)) if c.get("expirationDate") else 0
-        lines.append(
-            f"{domain}\t{flag}\t{path}\t{secure}\t{exp}\t"
-            f"{c.get('name', '')}\t{c.get('value', '')}"
-        )
-    netscape_path = p.with_suffix(".txt")
-    netscape_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
-    return str(netscape_path)
-
+# ---------------------------------------------------------------------------
+# 音频下载
+# ---------------------------------------------------------------------------
 
 def _download_audio(
-    video_info: VideoInfo, work_dir: Path, cookies_path: str
+    video_info: VideoInfo, work_dir: Path
 ) -> str:
     """用 yt-dlp 下载音频，返回音频文件路径。已有则复用。"""
     page = getattr(video_info, "page", 1)
     audio_prefix = f"{video_info.bvid}.p{page}" if page > 1 else video_info.bvid
+
+    # 检查是否已缓存
     for p in sorted(work_dir.glob(f"{audio_prefix}.*")):
         if p.suffix.lower() in (".m4a", ".webm", ".mp3", ".opus", ".aac"):
             return str(p)
+
     print("[bilibili-note] 下载音频中，请耐心等待...", file=sys.stderr)
     url = f"https://www.bilibili.com/video/{video_info.bvid}"
     if page > 1:
@@ -60,17 +37,16 @@ def _download_audio(
         "--no-progress",
         "--no-playlist",
         "-o", output_template,
+        url,
     ]
-    if cookies_path:
-        netscape_path = _ensure_netscape_cookies(cookies_path)
-        cmd += ["--cookies", netscape_path]
-    cmd.append(url)
     try:
         subprocess.run(cmd, check=True, capture_output=True, text=True)
     except (KeyboardInterrupt, subprocess.CalledProcessError):
         _cleanup_partial(work_dir, audio_prefix)
         raise
     print("[bilibili-note] 音频下载完成", file=sys.stderr)
+
+    # 找到刚下载的文件
     for p in sorted(work_dir.glob(f"{audio_prefix}.*")):
         if p.suffix.lower() in (".m4a", ".webm", ".mp3", ".opus", ".aac"):
             return str(p)
@@ -78,14 +54,19 @@ def _download_audio(
     raise RuntimeError("音频下载失败，文件未找到")
 
 
-def _cleanup_partial(work_dir: Path, bvid: str) -> None:
+def _cleanup_partial(work_dir: Path, prefix: str) -> None:
     """清理下载中断的残留文件（.part、.ytdl 等）。"""
-    for p in sorted(work_dir.glob(f"{bvid}*")):
+    for p in sorted(work_dir.glob(f"{prefix}*")):
         if p.is_file():
             p.unlink(missing_ok=True)
 
 
+# ---------------------------------------------------------------------------
+# whisper 转录
+# ---------------------------------------------------------------------------
+
 def _seconds_to_srt(sec: float) -> str:
+    """秒数转 SRT 时间戳格式。"""
     h = int(sec // 3600)
     m = int((sec % 3600) // 60)
     s = int(sec % 60)
@@ -93,7 +74,7 @@ def _seconds_to_srt(sec: float) -> str:
     return f"{h:02d}:{m:02d}:{s:02d},{ms:03d}"
 
 
-# whisper 模型下载 URL
+# whisper 模型下载 URL（来自 openai-whisper 源码）
 _MODEL_URLS = {
     "tiny.en": "https://openaipublic.azureedge.net/main/whisper/models/d3dd57d32accea0b295c96e26691aa14d8822fac7d9d27d5dc00b4ca2826dd03/tiny.en.pt",
     "tiny": "https://openaipublic.azureedge.net/main/whisper/models/65147644a518d12f04e32d6f3b26facc3f8dd46e5390956a9424a650c0ce22b9/tiny.pt",
@@ -113,19 +94,20 @@ _MODEL_URLS = {
 
 
 def _ensure_model(model_name: str) -> None:
-    """确保 whisper 模型已缓存且 SHA256 正确，否则下载并显示干净进度。"""
+    """确保 whisper 模型已缓存且 SHA256 正确，否则接管下载并显示干净进度。"""
     import hashlib
     import urllib.request
 
     url = _MODEL_URLS.get(model_name)
     if not url:
-        return  # 未知模型，交给 whisper 自己处理
+        return  # 未知模型名，交给 whisper 自己处理
 
     cache_dir = os.path.join(os.path.expanduser("~"), ".cache", "whisper")
     os.makedirs(cache_dir, exist_ok=True)
     model_path = os.path.join(cache_dir, f"{model_name}.pt")
-    expected_hash = url.split("/")[-2]
+    expected_hash = url.split("/")[-2]  # URL 路径倒数第二段即 SHA256
 
+    # 校验已有缓存
     if os.path.exists(model_path) and os.path.getsize(model_path) > 0:
         sha = hashlib.sha256()
         with open(model_path, "rb") as f:
@@ -135,10 +117,10 @@ def _ensure_model(model_name: str) -> None:
                     break
                 sha.update(chunk)
         if sha.hexdigest() == expected_hash:
-            return  # 缓存有效，whisper 不会重复下载
-        # 损坏文件，删掉重下
-        os.unlink(model_path)
+            return  # 缓存有效
+        os.unlink(model_path)  # 损坏则删掉重下
 
+    # 下载模型（用 urllib 接管进度，避免 whisper 内部 tqdm 刷屏）
     print(f"[bilibili-note] 下载 whisper 模型 ({model_name}) ...",
           file=sys.stderr, end="", flush=True)
 
@@ -160,7 +142,7 @@ def _ensure_model(model_name: str) -> None:
                           f"{pct}%", file=sys.stderr, end="", flush=True)
         with open(model_path, "wb") as f:
             f.write(data)
-        print(file=sys.stderr)  # 换行
+        print(file=sys.stderr)
     except Exception:
         print(file=sys.stderr)
         if os.path.exists(model_path):
@@ -171,12 +153,11 @@ def _ensure_model(model_name: str) -> None:
 def _transcribe(
     audio_path: str, work_dir: Path, bvid: str, model_name: str
 ) -> str:
-    """用 whisper 转录音频，输出 SRT 文件。"""
+    """用 whisper 转录音频为 SRT 字幕文件。"""
     import warnings
 
     import whisper
 
-    # 确保模型已下载（接管进度输出，避免 tqdm 刷屏）
     _ensure_model(model_name)
 
     print("[bilibili-note] whisper 转录中，请耐心等待...", file=sys.stderr)
@@ -188,6 +169,7 @@ def _transcribe(
         )
     print("[bilibili-note] whisper 转录完成", file=sys.stderr)
 
+    # 写入 SRT 文件
     srt_path = work_dir / f"{bvid}.asr.srt"
     blocks = []
     for i, seg in enumerate(result.get("segments", []), 1):
@@ -200,26 +182,19 @@ def _transcribe(
     return str(srt_path)
 
 
-def fetch_subtitle_via_asr(
+# ---------------------------------------------------------------------------
+# 公开入口
+# ---------------------------------------------------------------------------
+
+def fetch_subtitle(
     video_info: VideoInfo,
-    work_dir: str,
-    cookies_path: str = "",
+    work_dir: str = ".cache",
     model_name: str = "small",
 ) -> tuple[str, str]:
-    """ASR 兜底：下载音频 + whisper 转录。
-
-    Args:
-        video_info: 视频元信息。
-        work_dir: 工作目录（音频和字幕临时文件）。
-        cookies_path: cookies 文件路径。
-        model_name: whisper 模型名（tiny/base/small/medium/large）。
-
-    Returns:
-        (srt文件路径, "ASR转录")
-    """
+    """下载音频 + whisper 转录，返回 (SRT路径, 来源标记)。"""
     work = Path(work_dir)
     work.mkdir(parents=True, exist_ok=True)
 
-    audio_path = _download_audio(video_info, work, cookies_path)
+    audio_path = _download_audio(video_info, work)
     srt_path = _transcribe(audio_path, work, video_info.bvid, model_name)
     return srt_path, "ASR转录"
