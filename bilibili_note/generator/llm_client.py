@@ -1,11 +1,24 @@
 """OpenAI 兼容 LLM 客户端。
 
 通过标准 /v1/chat/completions 接口调用，支持任意 OpenAI 兼容服务。
+带自动重试，处理连接中断、超时等瞬时错误。
 """
 
 from __future__ import annotations
 
+import sys
+import time
+
 import httpx
+
+_RETRYABLE = (
+    httpx.RemoteProtocolError,
+    httpx.ReadTimeout,
+    httpx.ConnectError,
+    httpx.ReadError,
+)
+_MAX_RETRIES = 3
+_RETRY_BACKOFF = 2.0  # 首次重试等待秒数，之后翻倍
 
 
 def is_api_configured(config: dict) -> bool:
@@ -45,7 +58,10 @@ class LLMClient:
         )
 
     def chat(self, system: str, user: str, temperature: float = 0.7) -> str:
-        """调用 chat completions，返回生成的文本，同时累计 token 用量。"""
+        """调用 chat completions，返回生成的文本，同时累计 token 用量。
+
+        瞬时网络错误自动重试（最多 3 次，指数退避）。
+        """
         payload: dict = {
             "model": self.model,
             "messages": [
@@ -57,18 +73,32 @@ class LLMClient:
         if self.max_tokens and self.max_tokens > 0:
             payload["max_tokens"] = self.max_tokens
 
-        resp = httpx.post(
-            f"{self.base_url}/chat/completions",
-            json=payload,
-            headers={"Authorization": f"Bearer {self.api_key}"},
-            timeout=self.timeout,
-        )
-        resp.raise_for_status()
-        data = resp.json()
-        usage = data.get("usage", {})
-        self.total_prompt_tokens += usage.get("prompt_tokens", 0)
-        self.total_completion_tokens += usage.get("completion_tokens", 0)
-        return data["choices"][0]["message"]["content"]
+        url = f"{self.base_url}/chat/completions"
+        headers = {"Authorization": f"Bearer {self.api_key}"}
+        last_exc: Exception | None = None
+
+        for attempt in range(_MAX_RETRIES + 1):
+            try:
+                resp = httpx.post(
+                    url, json=payload, headers=headers, timeout=self.timeout,
+                )
+                resp.raise_for_status()
+                data = resp.json()
+                usage = data.get("usage", {})
+                self.total_prompt_tokens += usage.get("prompt_tokens", 0)
+                self.total_completion_tokens += usage.get("completion_tokens", 0)
+                return data["choices"][0]["message"]["content"]
+            except _RETRYABLE as exc:
+                last_exc = exc
+                if attempt < _MAX_RETRIES:
+                    wait = _RETRY_BACKOFF * (2 ** attempt)
+                    print(
+                        f"[bilibili-note] LLM 请求失败，{wait:.0f}s 后重试 "
+                        f"({attempt + 1}/{_MAX_RETRIES}): {exc}",
+                        file=sys.stderr,
+                    )
+                    time.sleep(wait)
+        raise last_exc  # type: ignore[misc]
 
     def get_usage(self) -> dict:
         """返回累计 token 用量。"""

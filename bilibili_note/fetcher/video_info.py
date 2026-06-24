@@ -39,6 +39,7 @@ class VideoInfo:
     desc: str
     pic: str
     pubdate: int
+    page: int = 1  # 分 P 序号
 
     def to_dict(self) -> dict:
         return asdict(self)
@@ -127,6 +128,7 @@ def fetch_video_info(url: str, cookies_path: str = "") -> VideoInfo:
         desc=d.get("desc", "") or "",
         pic=d.get("pic", "") or "",
         pubdate=d.get("pubdate", 0),
+        page=page,
     )
 
 

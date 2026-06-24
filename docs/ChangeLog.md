@@ -14,6 +14,10 @@
 
 ---
 
+### 2026-06-24 · 分 P 下载修复 + LLM 自动重试
+- 修复合集分 P 视频音频下载：`_download_audio` URL 遗漏 `?p=N` 导致 yt-dlp 始终下载 p=1；VideoInfo 新增 page 字段，文件名区分分 P
+- LLM 客户端新增自动重试：瞬时错误（RemoteProtocolError、ReadTimeout、ConnectError）最多重试 3 次，指数退避 2/4/8s
+
 ### 2026-06-23 · 字幕默认 ASR + 进度条优化
 - 字幕获取默认改为 ASR（whisper 转录），原 `--asr` 改为 `--bilibili-sub` 使用 B站 API 字幕
 - 字幕校对与笔记生成添加进度条（████░░░░ 样式），LLM 调用期间显示当前段落进度

@@ -44,12 +44,16 @@ def _download_audio(
     video_info: VideoInfo, work_dir: Path, cookies_path: str
 ) -> str:
     """用 yt-dlp 下载音频，返回音频文件路径。已有则复用。"""
-    for p in sorted(work_dir.glob(f"{video_info.bvid}.*")):
+    page = getattr(video_info, "page", 1)
+    audio_prefix = f"{video_info.bvid}.p{page}" if page > 1 else video_info.bvid
+    for p in sorted(work_dir.glob(f"{audio_prefix}.*")):
         if p.suffix.lower() in (".m4a", ".webm", ".mp3", ".opus", ".aac"):
             return str(p)
     print("[bilibili-note] 下载音频中，请耐心等待...", file=sys.stderr)
     url = f"https://www.bilibili.com/video/{video_info.bvid}"
-    output_template = str(work_dir / f"{video_info.bvid}.%(ext)s")
+    if page > 1:
+        url += f"?p={page}"
+    output_template = str(work_dir / f"{audio_prefix}.%(ext)s")
     cmd = [
         "yt-dlp",
         "-f", "bestaudio[ext=m4a]/bestaudio/best",
@@ -64,13 +68,13 @@ def _download_audio(
     try:
         subprocess.run(cmd, check=True, capture_output=True, text=True)
     except (KeyboardInterrupt, subprocess.CalledProcessError):
-        _cleanup_partial(work_dir, video_info.bvid)
+        _cleanup_partial(work_dir, audio_prefix)
         raise
     print("[bilibili-note] 音频下载完成", file=sys.stderr)
-    for p in sorted(work_dir.glob(f"{video_info.bvid}.*")):
+    for p in sorted(work_dir.glob(f"{audio_prefix}.*")):
         if p.suffix.lower() in (".m4a", ".webm", ".mp3", ".opus", ".aac"):
             return str(p)
-    _cleanup_partial(work_dir, video_info.bvid)
+    _cleanup_partial(work_dir, audio_prefix)
     raise RuntimeError("音频下载失败，文件未找到")
 
 
