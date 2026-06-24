@@ -14,6 +14,13 @@
 
 ---
 
+### 2026-06-24 · 输出目录重构 + 合集结构识别
+- VideoInfo 新增 series_title、episode_title 字段，自动识别合集视频的系列名与分集名
+- 产物统一输出到视频专属文件夹：notes/{系列名}/{分集名}/ 或 notes/{标题}/
+- 每文件夹内含 note.md、original.srt（原始字幕）、refined.txt（校对字幕）
+- yt-dlp 下载错误增加提示（建议关闭代理），重试时显示错误首行避免刷屏
+- notes/ 加入 .gitignore，清理 git 追踪的旧 notes 文件
+
 ### 2026-06-24 · 精简为纯 ASR 路径
 - 删除 fetcher/subtitle.py（B站 API 字幕、yt-dlp 备选字幕）
 - 删除 cookies 相关逻辑（video_info.load_cookies、asr._ensure_netscape_cookies、--bilibili-sub 参数）

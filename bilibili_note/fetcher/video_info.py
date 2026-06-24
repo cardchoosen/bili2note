@@ -27,13 +27,15 @@ class VideoInfo:
     bvid: str
     aid: int
     cid: int
-    title: str
+    title: str          # 完整标题（系列名 - 分集名）
     up: str
-    duration: int  # 秒
+    duration: int       # 秒
     desc: str
     pic: str
     pubdate: int
-    page: int = 1  # 分P序号
+    page: int = 1       # 分P序号
+    series_title: str = ""   # 合集/系列标题（单集时为空）
+    episode_title: str = ""  # 分集标题（单集时为空）
 
     def to_dict(self) -> dict:
         return asdict(self)
@@ -78,13 +80,24 @@ def fetch_video_info(url: str) -> VideoInfo:
 
     # 分P 视频：从 pages 数组取对应页的 cid、标题、时长
     pages = d.get("pages", [])
+    series_title = ""
+    episode_title = ""
     if page > 1 and len(pages) >= page:
         page_info = pages[page - 1]
         cid = page_info["cid"]
         part = page_info.get("part", "")
-        if part:
-            title = f"{title} - {part}"
         duration = page_info.get("duration", duration)
+        if part:
+            series_title = title
+            episode_title = part
+            title = f"{title} - {part}"
+    elif len(pages) > 1:
+        # 多P视频但用户没指定 p=，默认取第一页
+        page_info = pages[0]
+        part = page_info.get("part", "")
+        if part:
+            series_title = title
+            episode_title = part
 
     return VideoInfo(
         bvid=bvid,
@@ -97,6 +110,8 @@ def fetch_video_info(url: str) -> VideoInfo:
         pic=d.get("pic", "") or "",
         pubdate=d.get("pubdate", 0),
         page=page,
+        series_title=series_title,
+        episode_title=episode_title,
     )
 
 

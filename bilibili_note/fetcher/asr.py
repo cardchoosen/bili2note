@@ -1,23 +1,40 @@
-"""字幕获取层：下载音频 + whisper 转录生成字幕。"""
+"""字幕获取层：yt-dlp 下载音频 + whisper 转录生成字幕。"""
 
 from __future__ import annotations
 
 import os
 import subprocess
 import sys
+import time
 from pathlib import Path
 
 from .video_info import VideoInfo
 
 
 # ---------------------------------------------------------------------------
-# 音频下载
+# 音频下载（yt-dlp）
 # ---------------------------------------------------------------------------
 
-def _download_audio(
-    video_info: VideoInfo, work_dir: Path
-) -> str:
-    """用 yt-dlp 下载音频，返回音频文件路径。已有则复用。"""
+# yt-dlp 瞬时网络错误关键词，匹配到则触发重试
+_RETRYABLE_ERRORS = (
+    "SSL: UNEXPECTED_EOF_WHILE_READING",
+    "EOF occurred in violation of protocol",
+    "HTTP Error 5",
+    "HTTP Error 412",
+    "timed out",
+    "Connection reset by peer",
+    "No route to host",
+)
+
+_MAX_RETRIES = 3
+_BACKOFF = 2.0  # 首次重试等待秒数，之后翻倍
+
+
+def _download_audio(video_info: VideoInfo, work_dir: Path) -> str:
+    """用 yt-dlp 下载 B站视频音频，返回文件路径。已有缓存则复用。
+
+    瞬时网络错误自动重试（最多 3 次，指数退避），失败时打印 yt-dlp 错误详情。
+    """
     page = getattr(video_info, "page", 1)
     audio_prefix = f"{video_info.bvid}.p{page}" if page > 1 else video_info.bvid
 
@@ -27,6 +44,8 @@ def _download_audio(
             return str(p)
 
     print("[bilibili-note] 下载音频中，请耐心等待...", file=sys.stderr)
+    print("[bilibili-note] 提示：如遇网络问题可尝试关闭代理后重试", file=sys.stderr)
+
     url = f"https://www.bilibili.com/video/{video_info.bvid}"
     if page > 1:
         url += f"?p={page}"
@@ -36,14 +55,47 @@ def _download_audio(
         "-f", "bestaudio[ext=m4a]/bestaudio/best",
         "--no-progress",
         "--no-playlist",
+        "--user-agent",
+        "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
+        "AppleWebKit/537.36 (KHTML, like Gecko) "
+        "Chrome/120.0.0.0 Safari/537.36",
+        "--add-header", "Referer:https://www.bilibili.com",
         "-o", output_template,
         url,
     ]
-    try:
-        subprocess.run(cmd, check=True, capture_output=True, text=True)
-    except (KeyboardInterrupt, subprocess.CalledProcessError):
-        _cleanup_partial(work_dir, audio_prefix)
-        raise
+
+    for attempt in range(_MAX_RETRIES + 1):
+        try:
+            subprocess.run(cmd, check=True, capture_output=True, text=True)
+            break
+        except KeyboardInterrupt:
+            _cleanup_partial(work_dir, audio_prefix)
+            raise
+        except subprocess.CalledProcessError as exc:
+            err_text = (exc.stderr or "") + (exc.stdout or "")
+            retryable = any(
+                keyword in err_text for keyword in _RETRYABLE_ERRORS
+            )
+            if retryable and attempt < _MAX_RETRIES:
+                wait = _BACKOFF * (2 ** attempt)
+                print(
+                    f"[bilibili-note] 下载失败，{wait:.0f}s 后重试 "
+                    f"({attempt + 1}/{_MAX_RETRIES})",
+                    file=sys.stderr,
+                )
+                # 只打印错误的第一行，避免刷屏
+                first_line = err_text.strip().split("\n")[0]
+                if first_line:
+                    print(f"[bilibili-note] 错误原因：{first_line}", file=sys.stderr)
+                time.sleep(wait)
+            else:
+                # 重试耗尽或不可重试的错误，打印完整信息后抛出
+                if err_text:
+                    print(f"[bilibili-note] yt-dlp 错误详情：\n{err_text.strip()}",
+                          file=sys.stderr)
+                _cleanup_partial(work_dir, audio_prefix)
+                raise
+
     print("[bilibili-note] 音频下载完成", file=sys.stderr)
 
     # 找到刚下载的文件
@@ -94,18 +146,18 @@ _MODEL_URLS = {
 
 
 def _ensure_model(model_name: str) -> None:
-    """确保 whisper 模型已缓存且 SHA256 正确，否则接管下载并显示干净进度。"""
+    """确保 whisper 模型已缓存且 SHA256 正确，否则接管下载并显示进度。"""
     import hashlib
     import urllib.request
 
     url = _MODEL_URLS.get(model_name)
     if not url:
-        return  # 未知模型名，交给 whisper 自己处理
+        return
 
     cache_dir = os.path.join(os.path.expanduser("~"), ".cache", "whisper")
     os.makedirs(cache_dir, exist_ok=True)
     model_path = os.path.join(cache_dir, f"{model_name}.pt")
-    expected_hash = url.split("/")[-2]  # URL 路径倒数第二段即 SHA256
+    expected_hash = url.split("/")[-2]
 
     # 校验已有缓存
     if os.path.exists(model_path) and os.path.getsize(model_path) > 0:
@@ -117,10 +169,9 @@ def _ensure_model(model_name: str) -> None:
                     break
                 sha.update(chunk)
         if sha.hexdigest() == expected_hash:
-            return  # 缓存有效
-        os.unlink(model_path)  # 损坏则删掉重下
+            return
+        os.unlink(model_path)
 
-    # 下载模型（用 urllib 接管进度，避免 whisper 内部 tqdm 刷屏）
     print(f"[bilibili-note] 下载 whisper 模型 ({model_name}) ...",
           file=sys.stderr, end="", flush=True)
 
@@ -169,7 +220,6 @@ def _transcribe(
         )
     print("[bilibili-note] whisper 转录完成", file=sys.stderr)
 
-    # 写入 SRT 文件
     srt_path = work_dir / f"{bvid}.asr.srt"
     blocks = []
     for i, seg in enumerate(result.get("segments", []), 1):
