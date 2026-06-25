@@ -12,13 +12,13 @@ B站课程视频转学习笔记 Agent 的功能与代码结构总览。
 
 字幕预处理：清洗语气词、合并碎片句、按主题分段、保留时间戳。字幕经过 LLM 校对（subtitle_refiner）：修正识别错误、繁体转简体、添加标点，输出优化字幕文件。字幕校对和笔记生成均有进度条展示。
 
-笔记生成：学长博客风 prompt 驱动 LLM，基于优化后字幕生成，长视频分段生成后合并。文风铁律内嵌于 prompt：禁 emoji、禁"老师"人称、禁分点罗列、禁 AI 套路话术、段落叙述为主。
+笔记生成：学长博客风 prompt 驱动 LLM，基于优化后字幕生成，长视频分段生成后合并。文风铁律内嵌于 prompt：禁 emoji、禁"老师"人称、禁分点罗列、禁 AI 套路话术、段落叙述为主。笔记头部含标题、原视频链接、UP 主、时长、生成日期、转写来源等元信息。
 
 双模式运行：agent 模式（零配置，外部 agent 接力生成）与 API 模式（填配置全自动）。
 
 字幕分段：默认每段 10 分钟，可通过 --segment-seconds 参数调整。长视频分段生成后合并。
 
-token 统计：API 模式下累计 LLM 调用的 prompt/completion/total token，生成完毕后输出。
+token 统计：API 模式下分步骤统计 LLM 调用的 prompt/completion/total token，输出结构化表格（字幕校对 / 笔记生成 / 总计），数字千分位格式化。
 
 ## 代码结构
 
@@ -41,7 +41,8 @@ docs/                    Features.md / ChangeLog.md / Plans.md
 notes/                   生成的笔记输出目录
 templates/               note_structure.md 笔记结构模板
 config.yaml              配置文件
-setup.sh                 一键安装脚本
+setup.sh                 一键安装脚本（创建 venv + 安装依赖）
+run.sh                   快启动脚本（自动 venv + 依赖检查 + 运行）
 ```
 
 ## 模块职责

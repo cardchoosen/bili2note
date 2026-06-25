@@ -14,6 +14,12 @@
 
 ---
 
+### 2026-06-25 · config.yaml 精简
+- 删除 bilibili 配置段（cookies_path）：纯 ASR 路径无需登录态，代码已不读取
+- 删除 subtitle.preferred_langs：B站 API 字幕路径已移除，该配置无引用
+- subtitle.asr_model 注释从"ASR 兜底用的"改为"whisper 模型"（现为唯一路径）
+- 顶部注释"WorkBuddy agent"改为"外部 agent"，与 README 措辞统一
+
 ### 2026-06-24 · token 分步统计表格
 - LLMClient 新增 reset_usage()，支持分步骤统计 token
 - 输出改为结构化表格（字幕校对 / 笔记生成 / 总计），数字千分位格式化

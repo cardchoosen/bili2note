@@ -2,26 +2,21 @@
 #
 # 两种运行模式：
 #   1. agent 模式（默认）：llm.api_key 留空，CLI 仅抓取字幕+预处理并输出结构化字幕文件，
-#      由 WorkBuddy agent 接力生成笔记 md。零配置即可使用。
+#      由外部 agent 接力生成笔记 md。零配置即可使用。
 #   2. API 模式：填入 llm 配置后，CLI 端到端全自动生成笔记。
 
-# LLM 配置（OpenAI 兼容接口）
+# LLM 配置（OpenAI 兼容接口，API 模式下生效）
 llm:
   base_url: ""        # OpenAI 兼容端点，如 https://api.openai.com/v1 、https://api.deepseek.com/v1
   api_key: ""         # 留空则走 agent 模式
-  model: "glm-5.2"    # 模型名，API 模式下生效
+  model: "glm-5.2"    # 模型名
   timeout: 120        # 单次请求超时（秒）
   max_tokens: 0       # 单段最大生成 token，0 表示不限制
 
-# B站配置
-bilibili:
-  cookies_path: "bilibili_cookies.json"    # JSON 或 Netscape 格式 cookies，AI 字幕需要登录态
-
 # 字幕
 subtitle:
-  preferred_langs: ["zh-Hans", "zh-CN", "zh", "ai-zh"]  # 字幕语言优先级，依次尝试
-  work_dir: ".cache"  # 字幕临时下载目录
-  asr_model: "small"  # ASR 兜底用的 whisper 模型（tiny/base/small/medium/large）
+  work_dir: ".cache"  # 音频/字幕临时文件目录
+  asr_model: "small"  # whisper 模型（tiny/base/small/medium/large）
 
 # 输出
 output:
